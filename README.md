@@ -8,12 +8,13 @@ s3 backend is the accepted way to go when working with a larger DevOps teams. Ho
 state files tagged in a repo work fine for smaller shops. This script helps to simplify
 and automate some of the terraform CLI calls, when using file based state.
 
-```
+## Usage from help file
+  * from `tf --help`
 
-## Usage
-From `--help` text
+```sh
 
-```
+$tf --help
+
 Script: tf
 Usage: tf [options]
 
@@ -33,8 +34,8 @@ Usage: tf [options]
     tf --init -s3 --ws=dev
     tf --plan --ws=dev
     tf --apply --ws=dev
-```
 
+```
 
 ### Typical Project Structure
 This is for use in projects separated by environment and or function, something
