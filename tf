@@ -5,7 +5,7 @@
 # ****************************************************************
 #
 # DESCRIPTION
-#    Script template for full bodied script
+#    Helper script for Terraform
 #
 # SYNTAX & EXAMPLES
 #    See 'SYNTAX' (below)
@@ -53,12 +53,11 @@ declare -ri MIN_ARG_COUNT=1
 declare -r SYNTAX=$(cat <<EOF
 
     Script: ${PROGNAME}
-    Purpose:
-    Usage: ${PROGNAME} [-h|--help] [-v|--version]
+    Purpose: Helper script for Terraform
+    Usage: ${PROGNAME} [options]
 
     Options:
-      -h|--help:  help and usage
-      -v| --version: show version info
+      --help:  help and usage
 
       --var:  show vars in terraform.tfvars file
       --ws=<workspace>: Set workspace
@@ -76,15 +75,20 @@ declare -r SYNTAX=$(cat <<EOF
 
 EOF
 )
+
 # files & directories
+declare -r SCRIPT_FILE="${0}"
 declare -r SCRIPT_DIR="$( dirname ${0} )"
 
 # actions
 declare -i SET_WORKSPACE=${FALSE}
+declare VALIDATE=${FALSE}
 declare -i INIT=${FALSE}
 declare -i PLAN=${FALSE}
 declare -i APPLY=${FALSE}
+declare -i DESTROY=${FALSE}
 declare -i SHOW_VARS=${FALSE}
+declare -i GO_HOME=${FALSE}
 declare -i DISTRIBUTE=${FALSE}
 
 # flags
@@ -94,8 +98,11 @@ declare -i S3_BACKEND=${FALSE}
 # script globals
 declare WORKSPACE=''
 declare -r WORK_DIR=$(pwd)
-declare -r VAR_FILE=$(realpath "${WORK_DIR}/../../terraform.tfvars")
-declare PLAN_FILE=''
+declare -r CONFIG_FILE="${SCRIPT_DIR}/tf.config.sh"
+#declare -r VAR_FILE=$(realpath "${WORK_DIR}/../../terraform.tfvars")
+declare VAR_FILE=''
+# default to terraform expected plan file
+declare PLAN_FILE=./terraform.tfplan
 # ---------------------------------------
 # COMMON FUNCTIONS
 # ---------------------------------------
@@ -129,6 +136,12 @@ show_help() {
 # ---------------------------------------
 # MAIN ROUTINES
 # ---------------------------------------
+source "${CONFIG_FILE}" \
+  || die "Unable to load Config File: ${CONFIG_FILE}"
+
+# common variable file at base of all environments
+VAR_FILE="${BASE_DIR}/terraform.tfvars"
+
 __set_workspace() {
   terraform workspace select "${WORKSPACE}" ||
     die "Workspace was not found: ${WORKSPACE}" 4
@@ -155,10 +168,10 @@ __show_vars() {
 }
 
 __init() {
-  __check_workspace
+  #__check_workspace
   # echo terraform init --var-file="${VAR_FILE}"
   # return 0
-  if (( S3_BACKEND )); then
+  if (( S3_BACKEND  && SET_WORK_SPACE )); then
     terraform init \
        --var-file="${VAR_FILE}" \
        --backend-config="dynamodb_table=xs-tfstatelock" \
@@ -171,7 +184,7 @@ __init() {
 }
 
 __plan() {
-  __check_workspace
+  #__check_workspace
   #echo "terraform plan --var-file=${VAR_FILE} -out ${PLAN_FILE}"
   #return 0
   terraform plan \
@@ -187,15 +200,68 @@ __plan() {
 }
 
 __apply() {
-  __check_workspace
+  #__check_workspace
   #echo terraform apply "${PLAN_FILE}"
   #return 0
   terraform apply "${PLAN_FILE}"
 }
 
+__destroy() {
+  terraform destroy \
+    --var-file="${VAR_FILE}"
+}
+
+__validate() {
+  terraform validate \
+    --var-file "${VAR_FILE}"
+}
+
 __distribute() {
-  cp "${0}" ~/bin
-  
+  local file=''
+  local -r dest=~/bin
+  local -ra files=(
+    "${SCRIPT_FILE}"
+    "${CONFIG_FILE}"
+  )
+  printf "\n"
+  for file in "${files[@]}"; do
+    cp "${file}" "${dest}" \
+      && printf "👍🏻  Copied: %s to %s\n" "${file}" "${dest}"
+  done
+  printf "\n"
+
+  #cp "${SCRIPT_DIR}/.tf" ~/bin \
+  #  && printf "👍🏻  Copied script to \bin script directory"
+
+}
+
+__check_virtualenv() {
+  local cur_dir="$(pwd)"
+  if ! (( DISTRIBUTE )); then
+    if [[ "${cur_dir}" != "${VIRTUALENV_DIR}" ]]; then
+        printf "\n🛠  Must set virtualenv first\n";
+        if [[ -d "${VIRTUALENV_DIR}" ]]; then
+          echo -e "cd ${VIRTUALENV_DIR}\n" | pbcopy
+          printf "Switch to base directory:%s\n" "${VIRTUALENV_DIR}"
+          printf "Press: Ctrl V\n"
+          printf "then, run: '. pyon'\n\n"
+        else
+          printf "  Couldn't find virtualenv directory: %s\n" "${VIRTUALENV_DIR}"
+        fi
+        exit 1;
+    fi
+  fi
+}
+
+__check_project_dir() {
+  if ! (( DISTRIBUTE )); then
+    [[ -f "${BASE_DIR}/terraform.tfvars" ]] \
+      || die "Something is wrong, couldn't find project terraform.tfvars" 3
+  fi
+}
+
+__go_home() {
+  exec cd "${PROJECT_DIR}"
 }
 
 __get_opts() {
@@ -203,13 +269,15 @@ __get_opts() {
     local arg="${1}"; shift;
     case ${arg} in
       --help)    show_help                ;;
-      --version) show_version             ;;
+      --val*)        VALIDATE=${TRUE}      ;;
       --init)            INIT=${TRUE}     ;;
       --plan)            PLAN=${TRUE}     ;;
+      --des*)             DESTROY=${TRUE}  ;;
       --simple)          SIMPLE=${TRUE}   ;;
       --apply)           APPLY=${TRUE}    ;;
       --vars)        SHOW_VARS=${TRUE}    ;;
       --s3)          S3_BACKEND=${TRUE}   ;;
+      --home)        GO_HOME=${TRUE}      ;;
       --get-workspace) __get_workspace    ;;
       --dist)      DISTRIBUTE=${TRUE}     ;;
 
@@ -224,11 +292,17 @@ __get_opts() {
 }
 
 __dispatch() {
+  # always must be in virtualenv
+  # __check_virtualenv
+
   (( SET_WORKSPACE )) && __set_workspace
   (( SHOW_VARS )) && __show_vars
+  (( VALIDATE )) && __validate
   (( INIT )) && __init
   (( PLAN )) && __plan
   (( APPLY )) && __apply
+  (( DESTROY )) && __destroy
+  (( GO_HOME )) && __go_home
   (( DISTRIBUTE )) && __distribute
   return 0
 }
