@@ -59,19 +59,38 @@ declare -r SYNTAX=$(cat <<EOF
     Options:
       --help:  help and usage
 
+      --val: Validate
+      --init, -i: Run formatted terraform init
+      --plan, -p: Run formatted terraform plan
+      --apply, -a: Run formatted terraform apply
+      --run, -r: Run all: validate -> init -> plan -> apply
+      --des, -d: Destroy infrastructure in plan
+
+      --dist: Copy script files into script bin directory
       --var:  show vars in terraform.tfvars file
-      --ws=<workspace>: Set workspace
-      --init: Run formatted terraform init
-      --plan: Run formatted terraform plan
-      --apply: Run formatted terraform apply
-      --dist: put it in script path directory
+      --copy-env, -c: Copy 'env.tf' (shared project variables) to current directory
+        * env.tf holds variable definitions shared globally across projects
 
     Examples:
-      ${PROGNAME} --vars
-      ${PROGNAME} --init --ws=prod
-      ${PROGNAME} --init -s3 --ws=dev
-      ${PROGNAME} --plan --ws=dev
-      ${PROGNAME} --apply --ws=dev
+      Initialize:
+        ${PROGNAME} -i
+        ${PROGNAME} --init
+      Plan:
+        ${PROGNAME} -p
+        ${PROGNAME} --plan
+      Apply:
+        ${PROGNAME} -a
+        ${PROGNAME} --apply
+      Run:
+        ${PROGNAME} -r
+        ${PROGNAME} --run
+      Run all:
+        ${PROGNAME} -i -p -a
+        ${PROGNAME} --init --plan --apply
+      Support:
+        ${PROGNAME} --copy-env
+        ${PROGNAME} --vars
+        ${PROGNAME} --dist
 
 EOF
 )
@@ -86,13 +105,14 @@ declare VALIDATE=${FALSE}
 declare -i INIT=${FALSE}
 declare -i PLAN=${FALSE}
 declare -i APPLY=${FALSE}
+declare -i RUN=${FALSE}
 declare -i DESTROY=${FALSE}
 declare -i SHOW_VARS=${FALSE}
 declare -i GO_HOME=${FALSE}
 declare -i DISTRIBUTE=${FALSE}
+declare -i COPY_ENV=${FALSE}
 
 # flags
-declare -i SIMPLE=${FALSE}
 declare -i S3_BACKEND=${FALSE}
 
 # script globals
@@ -141,30 +161,18 @@ source "${CONFIG_FILE}" \
 
 # common variable file at base of all environments
 VAR_FILE="${BASE_DIR}/terraform.tfvars"
-
-__set_workspace() {
-  terraform workspace select "${WORKSPACE}" ||
-    die "Workspace was not found: ${WORKSPACE}" 4
-  # s3 doesn't use the PLAN_FILE
-  (( S3_BACKEND )) \
-    || PLAN_FILE="terraform-${WORKSPACE}.tfplan"
-}
-
-__get_workspace() {
-  # set the WORKSPACE variable with current
-  WORKSPACE="$(terraform workspace show)"
-  #echo "Workspace: ${WORKSPACE}"
-}
-
-__check_workspace() {
-  # if workspace wasn't set --ws=<workspace>
-  (( SET_WORKSPACE )) || die "--ws=<workspace> is a required argument" 3
-}
-
+#
+# Primary Terraform execution routines
+#
 __show_vars() {
   # debug
   echo "Showing var file: ${VAR_FILE}"
   cat "${VAR_FILE}"
+}
+
+__validate() {
+  terraform validate \
+    --var-file "${VAR_FILE}"
 }
 
 __init() {
@@ -206,33 +214,43 @@ __apply() {
   terraform apply "${PLAN_FILE}"
 }
 
+__run() {
+  __validate && \
+  __init && \
+  __plan && \
+  __apply
+}
+
 __destroy() {
   terraform destroy \
     --var-file="${VAR_FILE}"
 }
 
-__validate() {
-  terraform validate \
-    --var-file "${VAR_FILE}"
+#
+# Support Routines
+#
+__copy_env() {
+  local -r file='env.tf'
+  cp "${BASE_DIR}/${file}" "${PWD}/${file}"
 }
 
-__distribute() {
-  local file=''
-  local -r dest=~/bin
-  local -ra files=(
-    "${SCRIPT_FILE}"
-    "${CONFIG_FILE}"
-  )
-  printf "\n"
-  for file in "${files[@]}"; do
-    cp "${file}" "${dest}" \
-      && printf "👍🏻  Copied: %s to %s\n" "${file}" "${dest}"
-  done
-  printf "\n"
+__set_workspace() {
+  terraform workspace select "${WORKSPACE}" ||
+    die "Workspace was not found: ${WORKSPACE}" 4
+  # s3 doesn't use the PLAN_FILE
+  (( S3_BACKEND )) \
+    || PLAN_FILE="terraform-${WORKSPACE}.tfplan"
+}
 
-  #cp "${SCRIPT_DIR}/.tf" ~/bin \
-  #  && printf "👍🏻  Copied script to \bin script directory"
+__get_workspace() {
+  # set the WORKSPACE variable with current
+  WORKSPACE="$(terraform workspace show)"
+  #echo "Workspace: ${WORKSPACE}"
+}
 
+__check_workspace() {
+  # if workspace wasn't set --ws=<workspace>
+  (( SET_WORKSPACE )) || die "--ws=<workspace> is a required argument" 3
 }
 
 __check_virtualenv() {
@@ -264,27 +282,60 @@ __go_home() {
   exec cd "${PROJECT_DIR}"
 }
 
+#
+# Distribution routines
+#
+__distribute() {
+  local file=''
+  local -r dest=~/bin
+  local -ra files=(
+    "${SCRIPT_FILE}"
+    "${CONFIG_FILE}"
+  )
+  printf "\n"
+  for file in "${files[@]}"; do
+    cp "${file}" "${dest}" \
+      && printf "👍🏻  Copied: %s to %s\n" "${file}" "${dest}"
+  done
+  printf "\n"
+
+  #cp "${SCRIPT_DIR}/.tf" ~/bin \
+  #  && printf "👍🏻  Copied script to \bin script directory"
+
+}
+#
+#  Action switch & dispatch routines
+#
 __get_opts() {
   while (( $# > 0 )); do
     local arg="${1}"; shift;
     case ${arg} in
-      --help)    show_help                ;;
-      --val*)        VALIDATE=${TRUE}      ;;
-      --init)            INIT=${TRUE}     ;;
-      --plan)            PLAN=${TRUE}     ;;
-      --des*)             DESTROY=${TRUE}  ;;
-      --simple)          SIMPLE=${TRUE}   ;;
-      --apply)           APPLY=${TRUE}    ;;
+      --help)    show_help                 ;;
+      # primary init, plan, apply, run & destroy actions
+      --val*|-v)        VALIDATE=${TRUE}  ;;
+      --init|-i)        INIT=${TRUE}      ;;
+      --plan|-p)        PLAN=${TRUE}      ;;
+      --apply|-a)       APPLY=${TRUE}     ;;
+      --run|-r)         RUN=${TRUE}       ;;
+      --des*|-d)        DESTROY=${TRUE}   ;;
+
+      --copy-env)    COPY_ENV=${TRUE}     ;;
       --vars)        SHOW_VARS=${TRUE}    ;;
+
+      # -- boolean flags
       --s3)          S3_BACKEND=${TRUE}   ;;
       --home)        GO_HOME=${TRUE}      ;;
-      --get-workspace) __get_workspace    ;;
-      --dist)      DISTRIBUTE=${TRUE}     ;;
 
+      # workspace - not currently used
       --ws*)
         SET_WORKSPACE=${TRUE}
         [[ ${arg} =~ '=' ]] && WORKSPACE="${arg#*=}"
         ;;
+      --get-workspace) __get_workspace    ;;
+
+      # distribution (local)
+      --dist*)      DISTRIBUTE=${TRUE}     ;;
+
       *) die "Unknown option: ${arg}" ;;
    esac
   done
@@ -294,15 +345,16 @@ __get_opts() {
 __dispatch() {
   # always must be in virtualenv
   # __check_virtualenv
-
   (( SET_WORKSPACE )) && __set_workspace
   (( SHOW_VARS )) && __show_vars
   (( VALIDATE )) && __validate
   (( INIT )) && __init
   (( PLAN )) && __plan
   (( APPLY )) && __apply
+  (( RUN )) && __run
   (( DESTROY )) && __destroy
   (( GO_HOME )) && __go_home
+  (( COPY_ENV )) && __copy_env
   (( DISTRIBUTE )) && __distribute
   return 0
 }
