@@ -1,12 +1,7 @@
 # tf
 
 > Terraform helper script. Manages file based state. Encapsulates to
-simplify and shorten cli commands.
-
-## File based state
-s3 backend is the accepted way to go when working with a larger DevOps teams. However,
-state files tagged in a repo work fine for smaller shops. This script helps to simplify
-and automate some of the terraform CLI calls, when using file based state.
+simplify and shorten common cli commands.
 
 ## Usage (from --help)
 
@@ -14,25 +9,45 @@ and automate some of the terraform CLI calls, when using file based state.
 
 $tf --help
 
-Script: tf
-Usage: tf [options]
+  Script: ${PROGNAME}
+  Purpose: Helper script for Terraform
+  Usage: ${PROGNAME} [options]
 
   Options:
-    -h|--help:  help and usage
-    -v| --version: show version info
+    --help:  help and usage
 
+    --val: Validate
+    --init, -i: Run formatted terraform init
+    --plan, -p: Run formatted terraform plan
+    --apply, -a: Run formatted terraform apply
+    --run, -r: Run all: validate -> init -> plan -> apply
+    --des, -d: Destroy infrastructure in plan
+
+    --dist: Copy script files into script bin directory
     --var:  show vars in terraform.tfvars file
-    --init: Run formatted terraform init
-    --plan: Run formatted terraform plan
-    --apply: Run formatted terraform apply
-    --dist: put it in script path directory
+    --copy-env, -c: Copy 'env.tf' (shared project variables) to current directory
+      * env.tf holds variable definitions shared globally across projects
 
   Examples:
-    tf --vars
-    tf --init --ws=prod
-    tf --init -s3 --ws=dev
-    tf --plan --ws=dev
-    tf --apply --ws=dev
+    Initialize:
+      ${PROGNAME} -i
+      ${PROGNAME} --init
+    Plan:
+      ${PROGNAME} -p
+      ${PROGNAME} --plan
+    Apply:
+      ${PROGNAME} -a
+      ${PROGNAME} --apply
+    Run:
+      ${PROGNAME} -r
+      ${PROGNAME} --run
+    Run all:
+      ${PROGNAME} -i -p -a
+      ${PROGNAME} --init --plan --apply
+    Support:
+      ${PROGNAME} --copy-env
+      ${PROGNAME} --vars
+      ${PROGNAME} --dist
 
 ```
 
